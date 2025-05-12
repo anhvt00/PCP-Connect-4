@@ -15,13 +15,12 @@ This is a prototype for Connect 4 for the class Programming Course Project. The 
 
 ## How to Run
 
-
 1. Run the game:
    ```bash
    python main.py
    ```
 
-2. Run tests:
+2. Run tests using `pytest`:
    ```bash
    pytest tests/
    ```
@@ -35,7 +34,7 @@ python -m venv venv
 source venv/bin/activate # on Linux
 ```
 
-Then, install the required dependencies:
+Then, install the required dependencies, including `pytest` for running tests:
 
 ```bash
 pip install -r requirements.txt
