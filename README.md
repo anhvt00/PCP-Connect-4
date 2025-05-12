@@ -11,7 +11,6 @@ This is a prototype for Connect 4 for the class Programming Course Project. The 
   - `minimax_agent.py`: Uses the Minimax algorithm.
   - `mcts_agent.py`: Monte Carlo Tree Search agent.
   - `rl_agent.py`: Reinforcement Learning agent.
-  - `agent_xy/`: Custom agent implementation.
 - `tests/`: Unit tests for the project.
 
 ## How to Run
