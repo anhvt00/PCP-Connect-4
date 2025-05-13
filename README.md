@@ -13,11 +13,19 @@ This is a prototype for Connect 4 for the class Programming Course Project. The 
 
 ## How to Run
 
-1. Run tests using `pytest`:
+
+ Run the game interface (the easiest way):
+   ```bash
+   python main.py
+   ```
+   One can play between two persons or between a person and an AI agent.
+
+
+## Testing
+ Run tests using `pytest`:
    ```bash
    pytest tests/
    ```
-
 ## Requirements
 
 To set up the environment, it is recommended to use a virtual environment. First, create and activate a virtual environment:

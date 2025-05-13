@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from game_utils import *
-# 3.2 initialize_game_state() tests
+# 1 initialize_game_state() tests
 def test_initialize_game_state_creates_empty_board():
     """
     Test that initialize_game_state returns a NumPy array of shape BOARD_SHAPE,
@@ -15,7 +15,7 @@ def test_initialize_game_state_creates_empty_board():
     assert np.all(board == NO_PLAYER), "All entries should equal NO_PLAYER (0)"
 
 
-# 3.3 pretty_print_board() tests
+# 2 pretty_print_board() tests
 def test_pretty_print_empty_board():
     """
     Test that an empty board is printed with borders, blank rows,
@@ -60,7 +60,7 @@ def test_pretty_print_board_with_pieces():
     assert lines[BOARD_ROWS - 1] == expected_second, "X should appear at (row=1, col=3)"
 
 
-# 3.4 string_to_board() round-trip test
+# 3 string_to_board() round-trip test
 def test_string_to_board_roundtrip():
     """
     Ensure that pretty_print_board → string_to_board is lossless.
@@ -77,7 +77,7 @@ def test_string_to_board_roundtrip():
     assert np.array_equal(b1, b2), "Round-trip conversion failed"
 
 
-# 3.5 apply_player_action() tests
+# 4 apply_player_action() tests
 def test_apply_player_action_stacks_correctly():
     """
     Verify pieces drop to the lowest available row in the specified column.
@@ -101,7 +101,7 @@ def test_apply_player_action_full_column_raises():
         apply_player_action(b, PlayerAction(0), PLAYER2)
 
 
-# 3.6 connected_four() tests
+# 5 connected_four() tests
 def test_connected_four_horizontal():
     """
     Horizontal line of 4 should be detected as a win.
@@ -146,7 +146,7 @@ def test_connected_four_negative():
     assert not connected_four(b, PLAYER1)
 
 
-# 3.7 check_end_state() tests
+# 6 check_end_state() tests
 def test_check_end_state_win():
     """
     If connected_four is True, state should be IS_WIN.
@@ -192,7 +192,7 @@ def test_check_end_state_still_playing():
     assert check_end_state(b, PLAYER1) == GameState.STILL_PLAYING
 
 
-# 3.8 check_move_status() tests
+# 7 check_move_status() tests
 def test_check_move_status_valid():
     """
     A valid move (correct type, in bounds, non-full) returns IS_VALID.

@@ -1,4 +1,3 @@
-# tests/test_random_agent.py
 import numpy as np
 from game_utils import initialize_game_state, PLAYER1, NO_PLAYER, BOARD_COLS
 from agents.random_agent import random_move
