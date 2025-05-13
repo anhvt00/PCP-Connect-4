@@ -16,11 +16,7 @@ class Node:
             board (np.ndarray): Current board state (6×7 array).
             turn (int): Player who just moved (PLAYER1 or PLAYER2).
 
-        Raises:
-            ValueError: If `turn` is not PLAYER1 or PLAYER2.
         """
-        if turn not in (PLAYER1, PLAYER2):
-            raise ValueError(f"Invalid player turn: {turn}")
         self.parent = parent
         self.board = board.copy()  # snapshot for isolation
         self.turn = turn  # last mover
