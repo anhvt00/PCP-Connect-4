@@ -1,56 +1,43 @@
-#!/usr/bin/env python3
-
-from game_utils import (
-    initialize_game_state,
-    pretty_print_board,
-    check_move_status,
-    apply_player_action,
-    check_end_state,
-    PlayerAction,
-    PLAYER1,
-    PLAYER2,
-    GameState,
-    MoveStatus,
-)
+from game_utils import *
 from agents.random_agent import Agent as RandomAgent
 from agents.minimax_agent import Agent as MinimaxAgent
-from agents.rl_agent import Agent as RLAgent
 from agents.mcts_agent import AgentMCTS
-# from agents.alphazero_agent import AgentAZ
 
-# Map mode inputs to agent callables
 AGENTS = {
     '1': ('Human vs Human', None),
     '2': ('Human vs Random AI', RandomAgent),
     '3': ('Human vs Minimax AI', MinimaxAgent),
-    '4': ('Human vs RL AI', RLAgent),
-    '5': ('Human vs MCTS AI', AgentMCTS),
-    # '6': ('Human vs AlphaZero AI', AgentAZ(lambda b,p: [1/BOARD_COLS]*BOARD_COLS, lambda b,p: 0.0)),
+    '4': ('Human vs MCTS AI', AgentMCTS),
 }
 
 
 def main():
+    # Prompt user to select a game mode
     print("Select mode:")
     for key, (desc, _) in AGENTS.items():
         print(f"  {key}. {desc}")
-    choice = input("Enter 1-6: ").strip()
+    choice = input(f"Enter 1-{len(AGENTS)}: ").strip()
     while choice not in AGENTS:
-        choice = input("Invalid choice; enter 1-6: ").strip()
+        choice = input("Invalid choice; enter 1-4: ").strip()
 
     desc, AgentCls = AGENTS[choice]
     print(f"→ {desc}")
-    ai_agent = AgentCls if AgentCls is not None else None
+    ai_agent = AgentCls  # selected AI or None for human
 
-    board = initialize_game_state()
-    current = PLAYER1
-    state_ai = None
+    board = initialize_game_state()  # empty board
+    current = PLAYER1                # PLAYER1 always starts
+    state_ai = None                  # placeholder for AI state
 
+    # Game loop until win or draw
     while True:
         print(pretty_print_board(board))
+
         if ai_agent and current == PLAYER2:
+            # AI's turn: call agent
             move, state_ai = ai_agent(board, current, state_ai)
             print(f"AI chooses column {int(move)}")
         else:
+            # Human's turn: solicit input
             raw = input(f"Player {int(current)}, choose column (0–6): ").strip()
             try:
                 move = PlayerAction(int(raw))
@@ -58,24 +45,26 @@ def main():
                 print("Please enter an integer 0-6.")
                 continue
 
+        # Validate move before applying
         status = check_move_status(board, move)
         if status is not MoveStatus.IS_VALID:
             print(status.value)
             continue
 
         apply_player_action(board, move, current)
-        state = check_end_state(board, current)
-        if state == GameState.IS_WIN:
+        result = check_end_state(board, current)
+        if result == GameState.IS_WIN:
             print(pretty_print_board(board))
             print(f"Player {int(current)} wins!")
             break
-        if state == GameState.IS_DRAW:
+        if result == GameState.IS_DRAW:
             print(pretty_print_board(board))
             print("It's a draw!")
             break
 
+        # Alternate turn
         current = PLAYER2 if current == PLAYER1 else PLAYER1
 
+
 if __name__ == "__main__":
-    from game_utils import BOARD_COLS
     main()

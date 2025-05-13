@@ -4,23 +4,16 @@ This is a prototype for Connect 4 for the class Programming Course Project. The 
 
 ## Files and Folders
 
-- `main.py`: Run the game.
 - `game_utils.py`: Helper functions for the game.
 - `agents/`: Contains AI agents:
   - `random_agent.py`: Makes random moves.
   - `minimax_agent.py`: Uses the Minimax algorithm.
   - `mcts_agent.py`: Monte Carlo Tree Search agent.
-  - `rl_agent.py`: Reinforcement Learning agent.
 - `tests/`: Unit tests for the project.
 
 ## How to Run
 
-1. Run the game:
-   ```bash
-   python main.py
-   ```
-
-2. Run tests using `pytest`:
+1. Run tests using `pytest`:
    ```bash
    pytest tests/
    ```

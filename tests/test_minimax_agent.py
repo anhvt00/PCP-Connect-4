@@ -3,21 +3,8 @@
 import numpy as np
 import pytest
 
-from agents.minimax_agent import (
-    get_valid_columns,
-    simulate_move,
-    score_position,
-    minimax_ab,
-)
-from game_utils import (
-    initialize_game_state,
-    apply_player_action,
-    PLAYER1,
-    PLAYER2,
-    BOARD_COLS,
-    BOARD_ROWS,
-    PlayerAction,
-)
+from agents.minimax_agent import *
+from game_utils import *
 
 
 def test_get_valid_columns_initial():

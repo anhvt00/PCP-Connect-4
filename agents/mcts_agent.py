@@ -1,376 +1,238 @@
-# agents/mcts_agent.py
-
+import time
 import numpy as np
-import math
-from typing import Optional, Dict, List, Tuple
-from game_utils import (
-    GenMove,
-    PlayerAction,
-    NO_PLAYER,
-    BOARD_COLS,
-    apply_player_action,
-    check_move_status,
-    check_end_state,
-    GameState,
-    MoveStatus,
-    PLAYER1,
-    PLAYER2,
-)
 import random
-from agents.minimax_agent import score_position  # static evaluation for hybrid rollouts
+import math
+from typing import Optional, List, Tuple, Any
+from game_utils import *
 
-class MCTSNode:
-    def __init__(
-        self,
-        board: np.ndarray,
-        parent: Optional['MCTSNode'],
-        player: np.int8
-    ):
+class Node:
+    """Monte Carlo tree node storing the game state and MCTS statistics."""
+    def __init__(self, parent: Optional['Node'], board: np.ndarray, turn: int) -> None:
         """
-        node.player is the player who just moved to reach this node.
+        Initialize a Node.
+
+        Args:
+            parent (Optional[Node]): Parent node in the tree, or None for root.
+            board (np.ndarray): Current board state (6×7 array).
+            turn (int): Player who just moved (PLAYER1 or PLAYER2).
+
+        Raises:
+            ValueError: If `turn` is not PLAYER1 or PLAYER2.
         """
-        self.board = board.copy()
+        if turn not in (PLAYER1, PLAYER2):
+            raise ValueError(f"Invalid player turn: {turn}")
         self.parent = parent
-        self.player = player
-        self.children: Dict[int, MCTSNode] = {}
-        self.wins = 0.0
-        self.visits = 0
+        self.board = board.copy()  # snapshot for isolation
+        self.turn = turn  # last mover
+        self.q = 0.0      # total reward from simulations
+        self.n = 0        # visit count
+        self.children: List['Node'] = []
+        self.expanded = False  # indicates if all children have been generated
 
-    def valid_moves(self) -> List[int]:
-        """Return list of valid column indices for next move."""
-        return [c for c in range(BOARD_COLS)
-                if check_move_status(self.board, np.int8(c)) == MoveStatus.IS_VALID]
-
-    def is_fully_expanded(self) -> bool:
-        return len(self.children) == len(self.valid_moves())
-
-    def uct_score(self, total_visits: int, c: float) -> float:
+    def is_terminal(self) -> bool:
         """
-        Upper Confidence Bound for Trees (UCT) score.
+        Check if this node represents a terminal state (win or draw).
+
+        Returns:
+            bool: True if no further moves or a win condition is met.
         """
-        if self.visits == 0:
-            return float('inf')
-        return (self.wins / self.visits
-                + c * math.sqrt(math.log(total_visits) / self.visits))
+        return check_end_state(self.board, self.turn) != GameState.STILL_PLAYING
 
-class MCTSAgent:
-    """
-    Monte Carlo Tree Search agent with UCT, hybrid static rollouts, and move ordering.
-    """
-    def __init__(self, iterations: int = 2000, c: float = 1.4, rollout_depth: int = 6):
-        self.iterations = iterations
-        self.c = c
-        self.rollout_depth = rollout_depth
+    def get_moves_count(self) -> int:
+        """
+        Count legal moves from this state.
 
-    def move(
-        self,
-        board: np.ndarray,
-        player: np.int8,
-        state: Optional[object] = None
-    ) -> Tuple[PlayerAction, Optional[object]]:
-        # Root node: previous mover is opponent
-        root = MCTSNode(
-            board,
-            parent=None,
-            player=PLAYER2 if player == PLAYER1 else PLAYER1
+        Returns:
+            int: Number of valid columns where a piece can be dropped.
+        """
+        return sum(
+            check_move_status(self.board, np.int8(c)) == MoveStatus.IS_VALID
+            for c in range(BOARD_COLS)
         )
 
-        for _ in range(self.iterations):
-            node = self._select(root)
-            result = self._simulate(node)
-            self._backpropagate(node, result)
+    def generate_moves(self, board: np.ndarray, turn: int) -> List[np.ndarray]:
+        """
+        Generate all successor board states for a move by `turn`.
 
-        # pick the child with highest visit count
-        best_move = max(root.children.items(), key=lambda item: item[1].visits)[0]
-        return PlayerAction(best_move), None
+        Args:
+            board (np.ndarray): Current board.
+            turn (int): Player to move (PLAYER1 or PLAYER2).
 
-    def _select(self, node: MCTSNode) -> MCTSNode:
+        Returns:
+            List[np.ndarray]: List of new board arrays after each legal play.
         """
-        Traverse the tree using UCT until a leaf, expand if possible.
-        """
-        while node.children:
-            total = sum(child.visits for child in node.children.values())
-            # order children by UCT score
-            node = max(
-                node.children.values(),
-                key=lambda n: n.uct_score(total, self.c)
-            )
-        if not node.is_fully_expanded():
-            return self._expand(node)
-        return node
+        moves = []
+        for c in range(BOARD_COLS):
+            if board[5, c] != 0:
+                continue  # column full
+            for r in range(6):
+                if board[r, c] == 0:
+                    new = board.copy()
+                    new[r, c] = turn
+                    moves.append(new)
+                    break  # move to next column
+        return moves
 
-    def _expand(self, node: MCTSNode) -> MCTSNode:
+    def add_child(self) -> None:
         """
-        Add one new child by exploring an untried move, in center-first order.
+        Expand one unexplored child node, if available.
+        Marks `expanded = True` when no further children can be added.
         """
-        # prioritize center columns for expansion
-        moves = sorted(node.valid_moves(), key=lambda c: abs(c - BOARD_COLS//2))
-        for move in moves:
-            if move not in node.children:
-                new_board = node.board.copy()
-                next_player = PLAYER2 if node.player == PLAYER1 else PLAYER1
-                apply_player_action(new_board, PlayerAction(move), next_player)
-                child = MCTSNode(new_board, parent=node, player=next_player)
-                node.children[move] = child
+        if self.expanded or self.is_terminal():
+            return
+        next_player = PLAYER1 if self.turn == PLAYER2 else PLAYER2
+        seen = {child.board.tobytes() for child in self.children}
+        for c in range(BOARD_COLS):
+            if self.board[5, c] != 0:
+                continue
+            for r in range(6):
+                if self.board[r, c] == 0:
+                    new_board = self.board.copy()
+                    new_board[r, c] = next_player
+                    key = new_board.tobytes()
+                    if key not in seen:
+                        self.children.append(Node(self, new_board, next_player))
+                        return
+                    break
+        self.expanded = True
+
+class MCTS:
+    """Monte Carlo Tree Search agent using UCT and random simulations."""
+
+    def __init__(self, symbol: int, t: float) -> None:
+        """
+        Initialize MCTS agent.
+
+        Args:
+            symbol (int): The agent's player ID (PLAYER1 or PLAYER2).
+            t (float): Time budget in seconds per move.
+
+        Raises:
+            ValueError: If `symbol` is invalid.
+        """
+        if symbol not in (PLAYER1, PLAYER2):
+            raise ValueError(f"Invalid symbol for MCTS agent: {symbol}")
+        self.symbol = symbol
+        self.t = t
+
+    def compute_move(self, node: "Node") -> Tuple[int, int]:
+        """
+        Run MCTS for up to `t` seconds and select a move.
+
+        Args:
+            node (Node): Root node of current state.
+
+        Returns:
+            Tuple[int, int]: (row, col) of chosen move, or (-1, -1).
+        """
+        time0 = time.time()
+        while (time.time() - time0) < self.t:
+            leaf = self.select(node)
+            if leaf is None:
+                return (-1, -1)
+            result = self.rollout(leaf)
+            self.backpropagate(leaf, result)
+        selected = self.best_child(node)
+        if selected is None:
+            return (-1, -1)
+        diff = np.where(selected.board != node.board)
+        if diff[0].size:
+            return int(diff[0][0]), int(diff[1][0])
+        return (-1, -1)
+
+    def move(self, board: np.ndarray, player: int, state: Any = None) -> Tuple[PlayerAction, Any]:
+        """
+        GenMove interface: wrap compute_move.
+
+        Args:
+            board (np.ndarray): Current board.
+            player (int): Player to move.
+            state (Any): Unused placeholder.
+
+        Returns:
+            Tuple[PlayerAction, Any]: Column action and unchanged state.
+        """
+        root = Node(None, board, player)
+        _, col = self.compute_move(root)
+        return PlayerAction(col), state
+
+    def select(self, node: "Node") -> Optional["Node"]:
+        """
+        Traverse tree via UCT until a leaf is found, expanding if needed.
+        """
+        while self.fully_expanded(node):
+            tmp = self.select_uct(node)
+            if tmp is node:
+                break
+            node = tmp
+        if node.is_terminal():
+            return node
+        node.add_child()
+        for child in node.children:
+            if child.n == 0:
                 return child
         return node
 
-    def _simulate(self, node: MCTSNode) -> float:
+    def select_uct(self, node: "Node") -> "Node":
         """
-        Perform a hybrid playout: heuristic moves up to rollout_depth, then static eval.
-        Returns 1.0 if node.player eventual win, 0.0 if loss, 0.5 draw.
+        Select child maximizing UCT score: Q/N + exploration.
         """
-        b = node.board.copy()
-        current = PLAYER2 if node.player == PLAYER1 else PLAYER1
-        for depth in range(self.rollout_depth):
-            state = check_end_state(b, current)
+        best_score = -math.inf
+        best_node = node
+        for child in node.children:
+            if child.n == 0:
+                score = math.inf
+            else:
+                exploitation = child.q / child.n
+                exploration = 2 * math.sqrt(math.log(node.n) / child.n)
+                score = exploitation + exploration
+            if score > best_score:
+                best_score, best_node = score, child
+        return best_node
+
+    def fully_expanded(self, node: "Node") -> bool:
+        """
+        Check if all possible children have been generated and visited.
+        """
+        possible = node.get_moves_count()
+        if len(node.children) < possible:
+            return False
+        return all(child.n > 0 for child in node.children)
+
+    def rollout(self, node: "Node") -> float:
+        """
+        Simulate random playout until terminal state, returning reward.
+        """
+        board = node.board.copy()
+        turn = node.turn
+        while True:
+            state = check_end_state(board, turn)
             if state == GameState.IS_WIN:
-                return 1.0 if current == node.player else 0.0
+                return 1.0 if turn == self.symbol else 0.0
             if state == GameState.IS_DRAW:
                 return 0.5
-            # heuristic move: win, block, center, random
-            # recompute valid moves for current board state
-            valid = [
-                c for c in range(BOARD_COLS)
-                if check_move_status(b, np.int8(c)) == MoveStatus.IS_VALID
-            ]
-            move = self._heuristic_move(b, current, valid)
-            apply_player_action(b, PlayerAction(move), current)
-            current = PLAYER2 if current == PLAYER1 else PLAYER1
-        # after rollout_depth, use static evaluation
-        static = score_position(b, node.player)
-        if static > 0:
-            return 1.0
-        if static < 0:
-            return 0.0
-        return 0.5
-        static = score_position(b, node.player)
-        if static > 0:
-            return 1.0
-        if static < 0:
-            return 0.0
-        return 0.5
-
-    def _heuristic_move(self, board: np.ndarray, current: np.int8, valid: List[int]) -> int:
-        """
-        Heuristic move: win, block, center, then random.
-        """
-        # winning move
-        for c in valid:
-            temp = board.copy()
-            apply_player_action(temp, PlayerAction(c), current)
-            if check_end_state(temp, current) == GameState.IS_WIN:
-                return c
-        # block opponent
-        opponent = PLAYER2 if current == PLAYER1 else PLAYER1
-        for c in valid:
-            temp = board.copy()
-            apply_player_action(temp, PlayerAction(c), opponent)
-            if check_end_state(temp, opponent) == GameState.IS_WIN:
-                return c
-        # center
-        center = BOARD_COLS // 2
-        if center in valid:
-            return center
-        # random
-        return random.choice(valid)
-
-    def _backpropagate(self, node: MCTSNode, reward: float):
-        """
-        Propagate simulation result up to the root.
-        """
-        while node:
-            node.visits += 1
-            node.wins += reward
-            node = node.parent
-
-# Expose agent
-AgentMCTS: GenMove = MCTSAgent().move
-# agents/mcts_agent.py
-
-import numpy as np
-import math
-from typing import Optional, Dict, List, Tuple
-from game_utils import (
-    GenMove,
-    PlayerAction,
-    NO_PLAYER,
-    BOARD_COLS,
-    apply_player_action,
-    check_move_status,
-    check_end_state,
-    GameState,
-    MoveStatus,
-    PLAYER1,
-    PLAYER2,
-)
-import random
-from agents.minimax_agent import score_position  # static evaluation for hybrid rollouts
-
-class MCTSNode:
-    def __init__(
-        self,
-        board: np.ndarray,
-        parent: Optional['MCTSNode'],
-        player: np.int8
-    ):
-        """
-        node.player is the player who just moved to reach this node.
-        """
-        self.board = board.copy()
-        self.parent = parent
-        self.player = player
-        self.children: Dict[int, MCTSNode] = {}
-        self.wins = 0.0
-        self.visits = 0
-
-    def valid_moves(self) -> List[int]:
-        """Return list of valid column indices for next move."""
-        return [c for c in range(BOARD_COLS)
-                if check_move_status(self.board, np.int8(c)) == MoveStatus.IS_VALID]
-
-    def is_fully_expanded(self) -> bool:
-        return len(self.children) == len(self.valid_moves())
-
-    def uct_score(self, total_visits: int, c: float) -> float:
-        """
-        Upper Confidence Bound for Trees (UCT) score.
-        """
-        if self.visits == 0:
-            return float('inf')
-        return (self.wins / self.visits
-                + c * math.sqrt(math.log(total_visits) / self.visits))
-
-class MCTSAgent:
-    """
-    Monte Carlo Tree Search agent with UCT, hybrid static rollouts, and move ordering.
-    """
-    def __init__(self, iterations: int = 2000, c: float = 1.4, rollout_depth: int = 6):
-        self.iterations = iterations
-        self.c = c
-        self.rollout_depth = rollout_depth
-
-    def move(
-        self,
-        board: np.ndarray,
-        player: np.int8,
-        state: Optional[object] = None
-    ) -> Tuple[PlayerAction, Optional[object]]:
-        # Root node: previous mover is opponent
-        root = MCTSNode(
-            board,
-            parent=None,
-            player=PLAYER2 if player == PLAYER1 else PLAYER1
-        )
-
-        for _ in range(self.iterations):
-            node = self._select(root)
-            result = self._simulate(node)
-            self._backpropagate(node, result)
-
-        # pick the child with highest visit count
-        best_move = max(root.children.items(), key=lambda item: item[1].visits)[0]
-        return PlayerAction(best_move), None
-
-    def _select(self, node: MCTSNode) -> MCTSNode:
-        """
-        Traverse the tree using UCT until a leaf, expand if possible.
-        """
-        while node.children:
-            total = sum(child.visits for child in node.children.values())
-            # order children by UCT score
-            node = max(
-                node.children.values(),
-                key=lambda n: n.uct_score(total, self.c)
-            )
-        if not node.is_fully_expanded():
-            return self._expand(node)
-        return node
-
-    def _expand(self, node: MCTSNode) -> MCTSNode:
-        """
-        Add one new child by exploring an untried move, in center-first order.
-        """
-        # prioritize center columns for expansion
-        moves = sorted(node.valid_moves(), key=lambda c: abs(c - BOARD_COLS//2))
-        for move in moves:
-            if move not in node.children:
-                new_board = node.board.copy()
-                next_player = PLAYER2 if node.player == PLAYER1 else PLAYER1
-                apply_player_action(new_board, PlayerAction(move), next_player)
-                child = MCTSNode(new_board, parent=node, player=next_player)
-                node.children[move] = child
-                return child
-        return node
-
-    def _simulate(self, node: MCTSNode) -> float:
-        """
-        Perform a hybrid playout: heuristic moves up to rollout_depth, then static eval.
-        Returns 1.0 if node.player eventual win, 0.0 if loss, 0.5 draw.
-        """
-        b = node.board.copy()
-        current = PLAYER2 if node.player == PLAYER1 else PLAYER1
-        for depth in range(self.rollout_depth):
-            state = check_end_state(b, current)
-            if state == GameState.IS_WIN:
-                return 1.0 if current == node.player else 0.0
-            if state == GameState.IS_DRAW:
+            moves = node.generate_moves(board, turn)
+            if not moves:
                 return 0.5
-            # heuristic move: win, block, center, random
-            # recompute valid moves for current board state
-            valid = [
-                c for c in range(BOARD_COLS)
-                if check_move_status(b, np.int8(c)) == MoveStatus.IS_VALID
-            ]
-            move = self._heuristic_move(b, current, valid)
-            apply_player_action(b, PlayerAction(move), current)
-            current = PLAYER2 if current == PLAYER1 else PLAYER1
-        # after rollout_depth, use static evaluation
-        static = score_position(b, node.player)
-        if static > 0:
-            return 1.0
-        if static < 0:
-            return 0.0
-        return 0.5
-        static = score_position(b, node.player)
-        if static > 0:
-            return 1.0
-        if static < 0:
-            return 0.0
-        return 0.5
+            board = random.choice(moves)
+            turn = PLAYER1 if turn == PLAYER2 else PLAYER2
 
-    def _heuristic_move(self, board: np.ndarray, current: np.int8, valid: List[int]) -> int:
+    def backpropagate(self, node: "Node", result: float) -> None:
         """
-        Heuristic move: win, block, center, then random.
-        """
-        # winning move
-        for c in valid:
-            temp = board.copy()
-            apply_player_action(temp, PlayerAction(c), current)
-            if check_end_state(temp, current) == GameState.IS_WIN:
-                return c
-        # block opponent
-        opponent = PLAYER2 if current == PLAYER1 else PLAYER1
-        for c in valid:
-            temp = board.copy()
-            apply_player_action(temp, PlayerAction(c), opponent)
-            if check_end_state(temp, opponent) == GameState.IS_WIN:
-                return c
-        # center
-        center = BOARD_COLS // 2
-        if center in valid:
-            return center
-        # random
-        return random.choice(valid)
-
-    def _backpropagate(self, node: MCTSNode, reward: float):
-        """
-        Propagate simulation result up to the root.
+        Propagate simulation result up to the root, updating Q and N.
         """
         while node:
-            node.visits += 1
-            node.wins += reward
+            node.n += 1
+            node.q += result if node.turn == self.symbol else (1.0 - result)
             node = node.parent
 
+    def best_child(self, node: "Node") -> Optional["Node"]:
+        """
+        Select the child with the highest visit count.
+        """
+        if not node.children:
+            return None
+        return max(node.children, key=lambda c: c.n)
+
 # Expose agent
-AgentMCTS: GenMove = MCTSAgent().move
+AgentMCTS: GenMove = MCTS(symbol=PLAYER1, t=5.0).move
